@@ -1,5 +1,5 @@
 {
-  "name": "NEARme hospital",
+  "name": "NEARME HOSPITALS",
   "description": "Locate hospitals and healthcare specialists within a custom radius using AI-powered search and geolocation.",
   "requestFramePermissions": [
     "geolocation"
