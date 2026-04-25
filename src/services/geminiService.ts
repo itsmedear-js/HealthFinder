@@ -35,7 +35,7 @@ export async function findNearbyHospitals(location: string | { lat: number; lon:
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: prompt,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -62,8 +62,7 @@ export async function findNearbyHospitals(location: string | { lat: number; lon:
             }
           },
           required: ["hospitals", "city"]
-        },
-        tools: [{ googleSearch: {} }]
+        }
       }
     });
 
