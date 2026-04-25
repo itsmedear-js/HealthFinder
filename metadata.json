@@ -1,6 +1,6 @@
 {
-  "name": "Nearby Health Finder",
-  "description": "Locate hospitals and healthcare specialists in your immediate vicinity using high-accuracy geolocation and AI-powered search.",
+  "name": "NEARme hospital",
+  "description": "Locate hospitals and healthcare specialists within a custom radius using AI-powered search and geolocation.",
   "requestFramePermissions": [
     "geolocation"
   ],

@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "review": {
+      "title": "Hospital Review",
+      "description": "User reviews and ratings for healthcare facilities.",
+      "type": "object",
+      "properties": {
+        "hospitalName": { "type": "string", "description": "Name of the hospital being reviewed" },
+        "hospitalAddress": { "type": "string", "description": "Address of the hospital to uniquely identify it" },
+        "userId": { "type": "string", "description": "Auth UID of the reviewer" },
+        "userName": { "type": "string", "description": "Display name of the reviewer" },
+        "rating": { "type": "number", "description": "Rating from 1 to 5" },
+        "comment": { "type": "string", "description": "Text review content" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["hospitalName", "hospitalAddress", "userId", "rating", "comment", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/reviews/{reviewId}": {
+      "schema": "review",
+      "description": "Collection of all hospital reviews"
+    }
+  }
+}
