@@ -110,29 +110,8 @@ export default function App() {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   useEffect(() => {
-    let watchId: number;
-    if (navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          
-          // Only re-search if location changed significantly (approx > 0.05 deg shift in any direction)
-          if (!lastSearchLocation.current || 
-              Math.abs(lastSearchLocation.current.lat - latitude) > 0.05 || 
-              Math.abs(lastSearchLocation.current.lon - longitude) > 0.05) {
-            
-            setLocation({ lat: latitude, lon: longitude });
-            lastSearchLocation.current = { lat: latitude, lon: longitude };
-            setSearchQuery(""); // Clear manual search when GPS takes over
-          }
-        },
-        (err) => console.error("Location watch error:", err),
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-      );
-    }
-    return () => {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
-    };
+    // We removed the automatic watchPosition to avoid conflicts and initial permission blocks.
+    // Geolocation is now triggered by user interaction (Use GPS button).
   }, []);
 
   useEffect(() => {
@@ -178,6 +157,8 @@ export default function App() {
     }
   };
 
+  const [retryCount, setRetryCount] = useState(0);
+
   const getLocation = () => {
     setIsLocating(true);
     setError(null);
@@ -187,19 +168,32 @@ export default function App() {
       return;
     }
 
+    // Fallback to low accuracy after 1 retry
+    const options = { 
+      enableHighAccuracy: retryCount === 0, 
+      timeout: 20000, 
+      maximumAge: 0 
+    };
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
         setLocation({ lat: latitude, lon: longitude });
         setIsLocating(false);
+        setRetryCount(0); // Reset on success
         performSearch({ lat: latitude, lon: longitude }, activeCategory || undefined, radius);
       },
       (err) => {
-        setError("Please enable location access to find nearby hospitals.");
+        setRetryCount(prev => prev + 1);
+        let msg = "Location access denied. Please enable it in browser settings or search for your city manually below.";
+        if (err.code === err.TIMEOUT) msg = "Location request timed out. Please check your internet or try searching by city name.";
+        if (err.code === err.POSITION_UNAVAILABLE) msg = "We couldn't determine your precise location. Try typing your city in the search bar.";
+        
+        setError(msg);
         setIsLocating(false);
-        console.error(err);
+        console.error("Geolocation error:", err);
       },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      options
     );
   };
 
@@ -425,12 +419,38 @@ export default function App() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-red-50 border border-red-100 p-6 rounded-3xl flex items-start gap-4 mb-8"
+            className="bg-red-50 border border-red-100 p-6 rounded-3xl flex items-start gap-4 mb-8 shadow-sm"
           >
             <AlertCircle className="text-red-500 shrink-0" size={24} />
-            <div>
+            <div className="flex-1">
               <h3 className="font-bold text-red-900 uppercase tracking-tighter">Request Interrupted</h3>
-              <p className="text-red-700 text-sm mt-1">{error}</p>
+              <p className="text-red-700 text-sm mt-1 leading-relaxed">{error}</p>
+              
+              {window.self !== window.top && error.includes("denied") && (
+                <p className="mt-2 text-xs text-red-600 bg-red-100/50 p-2 rounded-lg border border-red-100 flex items-center gap-2">
+                  <Activity size={12} />
+                  <span>Tip: If you're in a preview, try <strong>opening the app in a new tab</strong> to enable GPS.</span>
+                </p>
+              )}
+
+              <div className="flex flex-wrap gap-3 mt-4">
+                <button 
+                  onClick={getLocation}
+                  className="text-xs font-bold text-red-600 bg-white px-4 py-2.5 rounded-xl border border-red-200 hover:bg-red-50 transition-all uppercase tracking-widest shadow-sm active:scale-95"
+                >
+                  Try GPS Again
+                </button>
+                <button 
+                  onClick={() => {
+                    setError(null);
+                    const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement;
+                    if (searchInput) searchInput.focus();
+                  }}
+                  className="text-xs font-bold text-slate-600 bg-white px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition-all uppercase tracking-widest shadow-sm active:scale-95"
+                >
+                  Search Manually
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -764,7 +784,7 @@ export default function App() {
           </div>
           <div className="flex flex-col md:items-end gap-2 text-center md:text-right">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] leading-loose">
-              AI-Augmented Medical Search <br/> Powered by Google Gemini
+              AI-Augmented Medical Search V3.0 <br/> Powered by Google Gemini
             </p>
             <div className="flex gap-6 mt-2">
               <a href="#" className="text-[9px] font-black text-slate-300 hover:text-sky-600 transition-colors uppercase tracking-[0.2em]">Contact Emergency</a>
