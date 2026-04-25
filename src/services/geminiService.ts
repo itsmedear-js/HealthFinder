@@ -11,9 +11,11 @@ export interface Hospital {
   specialists: string[];
   rating?: number;
   phone?: string;
+  lat: number;
+  lng: number;
 }
 
-export async function findNearbyHospitals(location: string | { lat: number; lon: number }, category?: string, radiusKm: number = 10): Promise<Hospital[]> {
+export async function findNearbyHospitals(location: string | { lat: number; lon: number }, category?: string, radiusKm: number = 10): Promise<{ city: string; hospitals: Hospital[] }> {
   try {
     const locationDescription = typeof location === 'string' 
       ? `near "${location}"` 
@@ -30,6 +32,7 @@ export async function findNearbyHospitals(location: string | { lat: number; lon:
     4. List of key specialists or departments.
     5. A rating (out of 5) if available.
     6. Phone number if available.
+    7. Precise latitude and longitude coordinates. This is CRITICAL for GPS navigation, ensure high precision.
 
     Identify the City and State for the center of this search.`;
 
@@ -55,9 +58,11 @@ export async function findNearbyHospitals(location: string | { lat: number; lon:
                     items: { type: Type.STRING }
                   },
                   rating: { type: Type.NUMBER },
-                  phone: { type: Type.STRING }
+                  phone: { type: Type.STRING },
+                  lat: { type: Type.NUMBER },
+                  lng: { type: Type.NUMBER }
                 },
-                required: ["name", "distance", "address", "specialists"]
+                required: ["name", "distance", "address", "specialists", "lat", "lng"]
               }
             }
           },

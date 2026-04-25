@@ -18,9 +18,14 @@ import {
   Activity,
   MessageSquare,
   Send,
-  X
+  X,
+  Map as MapIcon,
+  List
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import { calculateDistance, formatDistance } from './lib/geo';
 import { findNearbyHospitals, Hospital } from './services/geminiService';
 import { 
   db, 
@@ -43,11 +48,28 @@ interface Review {
   createdAt: any;
 }
 
+// Fix Leaflet marker icons
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+function MapUpdater({ center, zoom }: { center: [number, number], zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, zoom);
+  }, [center, zoom, map]);
+  return null;
+}
+
 export default function App() {
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [radius, setRadius] = useState(10);
+  const [radius, setRadius] = useState(20);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [detectedCity, setDetectedCity] = useState<string | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -181,13 +203,28 @@ export default function App() {
     );
   };
 
-  const performSearch = async (loc: string | { lat: number; lon: number }, cat?: string, r: number = 10) => {
+  const performSearch = async (loc: string | { lat: number; lon: number }, cat?: string, r: number = 20) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await findNearbyHospitals(loc, cat, r) as any;
-      const detected = response.city || null;
+      const { city: detected, hospitals: results } = await findNearbyHospitals(loc, cat, r);
       
+      // Calculate real distances if we have user's GPS coords
+      let finalHospitals = results || [];
+      if (typeof loc !== 'string' && loc.lat && loc.lon) {
+        finalHospitals = finalHospitals.map(h => {
+          if (h.lat && h.lng) {
+            const realKm = calculateDistance(loc.lat, loc.lon, h.lat, h.lng);
+            return {
+              ...h,
+              realDistanceNum: realKm,
+              distance: formatDistance(realKm)
+            };
+          }
+          return h;
+        }).sort((a: any, b: any) => (a.realDistanceNum || 0) - (b.realDistanceNum || 0));
+      }
+
       // Validation: If manual text search, check if result matches query
       if (typeof loc === 'string' && detected) {
         const queryLower = loc.toLowerCase();
@@ -201,7 +238,7 @@ export default function App() {
         }
       }
 
-      setHospitals(response.hospitals || []);
+      setHospitals(finalHospitals);
       setDetectedCity(detected);
       if (detected && typeof loc !== 'string') {
         setSearchQuery(detected); // Sync search bar with GPS result
@@ -214,7 +251,10 @@ export default function App() {
   };
 
   const getDirections = (hospital: Hospital) => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(hospital.name + ' ' + hospital.address)}`;
+    const destination = hospital.lat && hospital.lng 
+      ? `${hospital.lat},${hospital.lng}` 
+      : encodeURIComponent(hospital.name + ' ' + hospital.address);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
     window.open(url, '_blank', 'referrer');
   };
 
@@ -332,7 +372,7 @@ export default function App() {
               </div>
               <input 
                 type="range"
-                min="1"
+                min="20"
                 max="50"
                 value={radius}
                 onChange={(e) => setRadius(parseInt(e.target.value))}
@@ -422,7 +462,7 @@ export default function App() {
         {/* Results */}
         {!loading && hospitals.length > 0 && (
           <div className="space-y-10">
-            <div className="flex items-end justify-between border-b border-slate-200 pb-8">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-slate-200 pb-8 gap-4">
               <div>
                 <h3 className="text-3xl font-black text-slate-900 tracking-tight uppercase">Search Results</h3>
                 <p className="text-slate-400 text-sm font-medium mt-1 flex items-center gap-1.5 uppercase tracking-widest">
@@ -431,90 +471,168 @@ export default function App() {
                   Showing results within <span className="text-sky-600 font-bold">{radius}km</span>
                 </p>
               </div>
-              <div className="text-[10px] font-black text-sky-600 bg-sky-50 border border-sky-100 px-4 py-2 rounded-xl uppercase tracking-[0.2em]">
-                {hospitals.length} Found in Range
+              
+              <div className="flex items-center gap-3">
+                <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                  <button 
+                    onClick={() => setViewMode('list')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                      viewMode === 'list' 
+                        ? 'bg-white text-sky-600 shadow-sm' 
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <List size={14} />
+                    List
+                  </button>
+                  <button 
+                    onClick={() => setViewMode('map')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                      viewMode === 'map' 
+                        ? 'bg-white text-sky-600 shadow-sm' 
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <MapIcon size={14} />
+                    Map view
+                  </button>
+                </div>
+                <div className="text-[10px] font-black text-sky-600 bg-sky-50 border border-sky-100 px-4 py-2 rounded-xl uppercase tracking-[0.2em] hidden sm:block">
+                  {hospitals.length} Found in Range
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <AnimatePresence mode="popLayout">
-                {hospitals.map((hospital, index) => (
-                  <motion.div
-                    key={hospital.name + index}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="group bg-white p-8 rounded-[2.5rem] border border-slate-100 hover:border-sky-400 hover:shadow-2xl hover:shadow-sky-100/30 transition-all duration-500 flex flex-col h-full relative"
-                  >
-                    <div className="flex justify-between items-start mb-6">
-                      <div className="bg-slate-50 p-4 rounded-2xl group-hover:bg-sky-600 transition-all duration-300">
-                        <HospitalIcon className="text-slate-300 group-hover:text-white transition-colors" size={28} />
-                      </div>
-                      {hospital.rating && (
-                        <div className="flex items-center gap-1 bg-white text-slate-900 border border-slate-100 px-3 py-1.5 rounded-xl text-sm font-black shadow-sm group-hover:border-sky-100">
-                          <Star size={14} className="text-amber-400" fill="currentColor" />
-                          <span>{hospital.rating}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex-grow space-y-3">
-                      <h4 className="text-2xl font-bold text-slate-800 leading-tight group-hover:text-sky-700 transition-colors">
-                        {hospital.name}
-                      </h4>
-                      <div className="flex items-center gap-2">
-                         <span className="text-sky-600 font-black text-[10px] uppercase tracking-[0.2em] bg-sky-50 px-2.5 py-1.5 rounded-lg border border-sky-100/50">
-                           {hospital.distance.toLowerCase().includes('km') ? hospital.distance : `${hospital.distance} KM`} Away
-                         </span>
-                      </div>
-                      <p className="text-slate-500 text-sm font-medium leading-relaxed">
-                        {hospital.address}
-                      </p>
-                    </div>
-
-                    <div className="mt-8 flex flex-wrap gap-1.5">
-                      {hospital.specialists.slice(0, 4).map((spec, i) => (
-                        <span 
-                          key={i} 
-                          className="text-[9px] font-black uppercase tracking-widest bg-slate-50 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-100"
-                        >
-                          {spec}
-                        </span>
-                      ))}
-                    </div>
-
-                      <div className="mt-10 pt-6 border-t border-slate-50 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {hospital.phone ? (
-                            <a 
-                              href={`tel:${hospital.phone}`} 
-                              className="flex items-center gap-2 text-slate-600 hover:text-sky-600 transition-colors text-sm font-bold group/link"
+            {viewMode === 'map' ? (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="w-full h-[600px] rounded-[2.5rem] overflow-hidden border-2 border-white shadow-2xl relative z-10"
+              >
+                <MapContainer 
+                  center={hospitals.length > 0 ? [hospitals[0].lat, hospitals[0].lng] : [30.3753, 69.3451]} 
+                  zoom={12} 
+                  style={{ height: '100%', width: '100%' }}
+                  scrollWheelZoom={true}
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  {hospitals.length > 0 && <MapUpdater center={[hospitals[0].lat, hospitals[0].lng]} zoom={12} />}
+                  
+                  {hospitals.map((hospital, idx) => (
+                    <Marker key={idx} position={[hospital.lat, hospital.lng]}>
+                      <Popup minWidth={250} className="custom-popup">
+                        <div className="p-2 space-y-3">
+                          <div className="flex items-center gap-2 text-[10px] font-black text-sky-600 uppercase tracking-widest bg-sky-50 px-2 py-1 rounded inline-block">
+                            <Activity size={12} />
+                            {hospital.distance}
+                          </div>
+                          <h4 className="font-bold text-lg text-slate-800 leading-tight">{hospital.name}</h4>
+                          <p className="text-xs text-slate-500 font-medium">{hospital.address}</p>
+                          
+                          <div className="flex gap-2 pt-2">
+                            <button 
+                              onClick={() => setSelectedHospital(hospital)}
+                              className="flex-1 bg-slate-900 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-sky-600 transition-colors"
                             >
-                              <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center group-hover/link:bg-sky-100/50">
-                                <Phone size={16} />
-                              </div>
-                            </a>
-                          ) : null}
-                          <button 
-                            onClick={() => setSelectedHospital(hospital)}
-                            className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-all"
+                              View Details
+                            </button>
+                            <button 
+                              onClick={() => getDirections(hospital)}
+                              className="w-10 h-10 flex items-center justify-center bg-slate-100 text-slate-600 rounded-lg hover:bg-sky-100/50 hover:text-sky-600 transition-colors"
+                            >
+                              <Navigation size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+              </motion.div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <AnimatePresence mode="popLayout">
+                  {hospitals.map((hospital, index) => (
+                    <motion.div
+                      key={hospital.name + index}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="group bg-white p-8 rounded-[2.5rem] border border-slate-100 hover:border-sky-400 hover:shadow-2xl hover:shadow-sky-100/30 transition-all duration-500 flex flex-col h-full relative"
+                    >
+                      <div className="flex justify-between items-start mb-6">
+                        <div className="bg-slate-50 p-4 rounded-2xl group-hover:bg-sky-600 transition-all duration-300">
+                          <HospitalIcon className="text-slate-300 group-hover:text-white transition-colors" size={28} />
+                        </div>
+                        {hospital.rating && (
+                          <div className="flex items-center gap-1 bg-white text-slate-900 border border-slate-100 px-3 py-1.5 rounded-xl text-sm font-black shadow-sm group-hover:border-sky-100">
+                            <Star size={14} className="text-amber-400" fill="currentColor" />
+                            <span>{hospital.rating}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-grow space-y-3">
+                        <h4 className="text-2xl font-bold text-slate-800 leading-tight group-hover:text-sky-700 transition-colors">
+                          {hospital.name}
+                        </h4>
+                        <div className="flex items-center gap-2">
+                           <span className="text-sky-600 font-black text-[10px] uppercase tracking-[0.2em] bg-sky-50 px-2.5 py-1.5 rounded-lg border border-sky-100/50">
+                             {hospital.distance.toLowerCase().includes('km') ? hospital.distance : `${hospital.distance} KM`} Away
+                           </span>
+                        </div>
+                        <p className="text-slate-500 text-sm font-medium leading-relaxed">
+                          {hospital.address}
+                        </p>
+                      </div>
+
+                      <div className="mt-8 flex flex-wrap gap-1.5">
+                        {hospital.specialists.slice(0, 4).map((spec, i) => (
+                          <span 
+                            key={i} 
+                            className="text-[9px] font-black uppercase tracking-widest bg-slate-50 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-100"
                           >
-                            <MessageSquare size={16} />
+                            {spec}
+                          </span>
+                        ))}
+                      </div>
+
+                        <div className="mt-10 pt-6 border-t border-slate-50 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {hospital.phone ? (
+                              <a 
+                                href={`tel:${hospital.phone}`} 
+                                className="flex items-center gap-2 text-slate-600 hover:text-sky-600 transition-colors text-sm font-bold group/link"
+                              >
+                                <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center group-hover/link:bg-sky-100/50">
+                                  <Phone size={16} />
+                                </div>
+                              </a>
+                            ) : null}
+                            <button 
+                              onClick={() => setSelectedHospital(hospital)}
+                              className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-all"
+                            >
+                              <MessageSquare size={16} />
+                            </button>
+                          </div>
+                          
+                          <button 
+                            onClick={() => getDirections(hospital)}
+                            className="h-12 px-6 bg-slate-900 text-white rounded-xl flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-widest group-hover:bg-sky-600 group-hover:shadow-lg group-hover:shadow-sky-100 transition-all active:scale-95"
+                          >
+                            <Navigation size={18} />
+                            Get Directions
                           </button>
                         </div>
-                        
-                        <button 
-                          onClick={() => getDirections(hospital)}
-                          className="h-12 px-6 bg-slate-900 text-white rounded-xl flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-widest group-hover:bg-sky-600 group-hover:shadow-lg group-hover:shadow-sky-100 transition-all active:scale-95"
-                        >
-                          <Navigation size={18} />
-                          Get Directions
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
             </div>
           )}
 
