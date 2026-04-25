@@ -1,0 +1,8 @@
+{
+  "name": "Nearby Health Finder",
+  "description": "Locate hospitals and healthcare specialists in your immediate vicinity using high-accuracy geolocation and AI-powered search.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}
