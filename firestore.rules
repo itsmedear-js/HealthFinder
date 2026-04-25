@@ -17,7 +17,6 @@ service cloud.firestore {
       return data.hospitalName is string && data.hospitalName.size() <= 200 &&
              data.hospitalAddress is string && data.hospitalAddress.size() <= 500 &&
              data.userName is string && data.userName.size() <= 100 &&
-             data.userId == request.auth.uid &&
              data.rating is number && data.rating >= 1 && data.rating <= 5 &&
              data.comment is string && data.comment.size() <= 2000 &&
              data.createdAt == request.time;
@@ -26,11 +25,9 @@ service cloud.firestore {
     match /reviews/{reviewId} {
       allow list: if true; // Public listings
       allow get: if true;
-      allow create: if isSignedIn() && isValidReview(incoming());
-      allow update: if isOwner(existing().userId) && 
-                      isValidReview(incoming()) && 
-                      incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'comment', 'createdAt']);
-      allow delete: if isOwner(existing().userId);
+      allow create: if isValidReview(incoming());
+      allow update: if false; // Anonymous users cannot update
+      allow delete: if false; // Anonymous users cannot delete
     }
   }
 }

@@ -22,6 +22,7 @@ export async function findNearbyHospitals(location: string | { lat: number; lon:
     const categoryConstraint = category ? `specifically looking for "${category}" related facilities` : '';
 
     const prompt = `Find 5-10 nearby hospitals, clinics, or medical centers ${locationDescription} strictly within a radius of approximately ${radiusKm} kilometers. ${categoryConstraint}
+    If the location is ambiguous, assume it is in Pakistan.
     For each facility, provide:
     1. The name.
     2. Approximate distance from the starting location (must be less than ${radiusKm}km).

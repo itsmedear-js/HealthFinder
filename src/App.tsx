@@ -18,33 +18,25 @@ import {
   Activity,
   MessageSquare,
   Send,
-  LogOut,
-  User as UserIcon,
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { findNearbyHospitals, Hospital } from './services/geminiService';
 import { 
-  auth, 
   db, 
-  signInWithGoogle, 
-  logout, 
-  onAuthStateChanged, 
   collection, 
   addDoc, 
   query, 
   where, 
   orderBy, 
   onSnapshot, 
-  serverTimestamp,
-  User
+  serverTimestamp
 } from './lib/firebase';
 
 interface Review {
   id?: string;
   hospitalName: string;
   hospitalAddress: string;
-  userId: string;
   userName: string;
   rating: number;
   comment: string;
@@ -52,7 +44,6 @@ interface Review {
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -62,6 +53,7 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const lastSearchLocation = useRef<{ lat: number; lon: number } | null>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -96,11 +88,36 @@ export default function App() {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
-    return () => unsubscribe();
+    let watchId: number;
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          
+          // Only re-search if location changed significantly (approx > 0.05 deg shift in any direction)
+          if (!lastSearchLocation.current || 
+              Math.abs(lastSearchLocation.current.lat - latitude) > 0.05 || 
+              Math.abs(lastSearchLocation.current.lon - longitude) > 0.05) {
+            
+            setLocation({ lat: latitude, lon: longitude });
+            lastSearchLocation.current = { lat: latitude, lon: longitude };
+            setSearchQuery(""); // Clear manual search when GPS takes over
+          }
+        },
+        (err) => console.error("Location watch error:", err),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    }
+    return () => {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+    };
   }, []);
+
+  useEffect(() => {
+    if (location && !searchQuery) {
+       performSearch(location, activeCategory || undefined, radius);
+    }
+  }, [location, activeCategory, radius]);
 
   useEffect(() => {
     if (!selectedHospital) return;
@@ -169,8 +186,26 @@ export default function App() {
     setError(null);
     try {
       const response = await findNearbyHospitals(loc, cat, r) as any;
+      const detected = response.city || null;
+      
+      // Validation: If manual text search, check if result matches query
+      if (typeof loc === 'string' && detected) {
+        const queryLower = loc.toLowerCase();
+        const detectedLower = detected.toLowerCase();
+        // Simple fuzzy match: query part of detected or vice versa
+        if (!detectedLower.includes(queryLower) && !queryLower.includes(detectedLower)) {
+          setError("Location not match. Showing results for " + detected);
+          setHospitals([]);
+          setDetectedCity(detected);
+          return;
+        }
+      }
+
       setHospitals(response.hospitals || []);
-      setDetectedCity(response.city || null);
+      setDetectedCity(detected);
+      if (detected && typeof loc !== 'string') {
+        setSearchQuery(detected); // Sync search bar with GPS result
+      }
     } catch (err) {
       setError("Failed to fetch nearby healthcare facilities. Please try again.");
     } finally {
@@ -185,15 +220,14 @@ export default function App() {
 
   const handleReviewSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedHospital || !newComment.trim()) return;
+    if (!selectedHospital || !newComment.trim()) return;
 
     setIsSubmittingReview(true);
     try {
       await addDoc(collection(db, 'reviews'), {
         hospitalName: selectedHospital.name,
         hospitalAddress: selectedHospital.address,
-        userId: user.uid,
-        userName: user.displayName || 'Anonymous',
+        userName: 'Anonymous Guest',
         rating: newRating,
         comment: newComment,
         createdAt: serverTimestamp()
@@ -224,34 +258,6 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-4">
-            {user ? (
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={logout}
-                  className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-                  title="Logout"
-                >
-                  <LogOut size={18} />
-                </button>
-                <div className="w-8 h-8 rounded-full bg-sky-100 border border-sky-200 overflow-hidden hidden sm:block">
-                  {user.photoURL ? (
-                    <img referrerPolicy="no-referrer" src={user.photoURL} alt={user.displayName || 'User'} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-sky-600 font-bold text-xs">
-                      {user.displayName?.[0] || 'U'}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <button 
-                onClick={signInWithGoogle}
-                className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-sky-600 transition-colors"
-              >
-                Sign In
-              </button>
-            )}
-
             <button 
               onClick={getLocation}
               disabled={isLocating || loading}
@@ -574,8 +580,8 @@ export default function App() {
                     )}
                   </div>
 
-                  {user ? (
-                    <form onSubmit={handleReviewSubmit} className="p-8 bg-slate-50 border-t border-slate-100 space-y-4">
+                  <div className="p-8 bg-slate-50 border-t border-slate-100 space-y-4">
+                    <form onSubmit={handleReviewSubmit} className="space-y-4">
                       <div className="flex items-center gap-4">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Rate Experience</span>
                         <div className="flex gap-1">
@@ -610,17 +616,7 @@ export default function App() {
                         </button>
                       </div>
                     </form>
-                  ) : (
-                    <div className="p-8 bg-slate-50 border-t border-slate-100 text-center">
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Please sign in to leave a review</p>
-                      <button 
-                        onClick={signInWithGoogle}
-                        className="bg-sky-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg shadow-sky-100 hover:bg-sky-700"
-                      >
-                        Sign In with Google
-                      </button>
-                    </div>
-                  )}
+                  </div>
                 </motion.div>
               </div>
             )}
